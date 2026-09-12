@@ -1,0 +1,9 @@
+# Temp / output
+*.log
+/out/
+/TestResults/
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
