@@ -82,13 +82,14 @@ function Find-InstalledBrowser {
         $currentSection = $null
         $props = @{}
 
-        Get-Content -LiteralPath $ffProfilesIni | ForEach-Object {
-            $line = $_.Trim()
+        foreach ($profileLine in Get-Content -LiteralPath $ffProfilesIni) {
+            $line = $profileLine.Trim()
             if ($line -match '^\[(.+)\]$') {
+                $nextSection = $matches[1]
                 if ($currentSection -and $currentSection -match '^Profile\d+$') {
                     $sectionData[$currentSection] = $props
                 }
-                $currentSection = $matches[1]
+                $currentSection = $nextSection
                 $props = @{}
             }
             elseif ($currentSection -and $line -match '^(.+?)=(.*)$') {
@@ -270,9 +271,11 @@ function Invoke-BrowserFavoritesExport {
         New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
     }
 
-    $allEntries = [System.Collections.Generic.List[object]]::new()
+    $totalFavoriteCount = 0
 
     foreach ($browser in $selected) {
+        $browserEntries = [System.Collections.Generic.List[object]]::new()
+
         foreach ($profile in $browser.Profiles) {
             if ($browser.Type -eq 'Chromium') {
                 $entries = Get-ChromiumBookmarkBarEntry -BookmarksFile $profile.BookmarksFile -BrowserName $browser.Name -ProfileName $profile.ProfileName
@@ -280,20 +283,24 @@ function Invoke-BrowserFavoritesExport {
             else {
                 $entries = Get-FirefoxBookmarkBarEntry -PlacesDb $profile.PlacesDb -ProfileName $profile.ProfileName
             }
-            foreach ($entry in $entries) { $allEntries.Add($entry) }
+            foreach ($entry in $entries) { $browserEntries.Add($entry) }
         }
+
+        $filePrefix = $browser.Name -replace '[<>:"/\\|?*]', '_'
+        $jsonPath = Join-Path $OutputPath "$filePrefix-BrowserFavorites.json"
+        $csvPath = Join-Path $OutputPath "$filePrefix-BrowserFavorites.csv"
+
+        $browserEntries | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+        $browserEntries | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+
+        $totalFavoriteCount += $browserEntries.Count
+        Write-Host "$($browser.Name): $($browserEntries.Count) favorite(s) exported." -ForegroundColor Green
+        Write-Host 'Saved to:' -ForegroundColor Green
+        Write-Host "  $jsonPath"
+        Write-Host "  $csvPath"
     }
 
-    $jsonPath = Join-Path $OutputPath 'BrowserFavorites.json'
-    $csvPath = Join-Path $OutputPath 'BrowserFavorites.csv'
-
-    $allEntries | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-    $allEntries | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
-
-    Write-Host "Compiled $($allEntries.Count) favorite(s) from $($selected.Count) browser(s)." -ForegroundColor Green
-    Write-Host 'Saved to:' -ForegroundColor Green
-    Write-Host "  $jsonPath"
-    Write-Host "  $csvPath"
+    Write-Host "Total favorites exported: $totalFavoriteCount" -ForegroundColor Green
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

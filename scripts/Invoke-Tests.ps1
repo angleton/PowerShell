@@ -10,7 +10,8 @@ if (-not (Get-Command -Name Invoke-Pester -ErrorAction SilentlyContinue)) {
 }
 
 $result = Invoke-Pester -Script $TestPath -PassThru -Quiet
-$inconclusiveCount = if ($null -eq $result.InconclusiveCount) { 0 } else { $result.InconclusiveCount }
+$inconclusiveProperty = $result.PSObject.Properties['InconclusiveCount']
+$inconclusiveCount = if ($inconclusiveProperty) { $inconclusiveProperty.Value } else { 0 }
 
 @(
     "Passed: $($result.PassedCount)"

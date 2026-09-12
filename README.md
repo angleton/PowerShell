@@ -8,7 +8,8 @@ A collection of PowerShell utility scripts.
 
 Detects installed browsers (Chrome, Edge, Brave, Vivaldi, Opera, Firefox), lets you
 choose which one(s) to pull Favorites/Bookmarks Bar entries from (or all of them),
-and exports the compiled results to `BrowserFavorites.json` and `BrowserFavorites.csv`.
+and exports each browser's results to browser-prefixed JSON and CSV files, such as
+`Google Chrome-BrowserFavorites.json` and `Google Chrome-BrowserFavorites.csv`.
 
 **Parameters**
 
@@ -19,9 +20,14 @@ and exports the compiled results to `BrowserFavorites.json` and `BrowserFavorite
 **Examples**
 
 ```powershell
+./scripts/Get-AvailableBrowserFavorites.ps1
 ./scripts/Get-BrowserFavorites.ps1
 ./scripts/Get-BrowserFavorites.ps1 -OutputPath C:\Reports\Favorites -All
 ```
+
+Run `Get-AvailableBrowserFavorites.ps1` first to see how many favorites were
+detected in each browser and are available to export. It does not create any
+export files. Then run `Get-BrowserFavorites.ps1` to export those favorites.
 
 **Notes**
 
@@ -29,6 +35,19 @@ and exports the compiled results to `BrowserFavorites.json` and `BrowserFavorite
   from their `Bookmarks` JSON file across all detected profiles.
 - Firefox bookmarks are read from `places.sqlite` and require the `sqlite3` CLI
   to be available on `PATH`. Without it, Firefox profiles are skipped with a warning.
+
+### Firefox Setup
+
+Set up the SQLite command-line tool required for Firefox bookmark extraction:
+
+```powershell
+./scripts/Install-Sqlite.ps1
+```
+
+The setup script does nothing when `sqlite3` is already available. Otherwise,
+it uses `winget` or, when unavailable, Chocolatey. Open a new PowerShell
+terminal if the installation completes but the script reports that `sqlite3`
+is not yet on `PATH`.
 
 ## Tests
 
