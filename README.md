@@ -29,3 +29,32 @@ and exports the compiled results to `BrowserFavorites.json` and `BrowserFavorite
   from their `Bookmarks` JSON file across all detected profiles.
 - Firefox bookmarks are read from `places.sqlite` and require the `sqlite3` CLI
   to be available on `PATH`. Without it, Firefox profiles are skipped with a warning.
+
+## Tests
+
+The test suite uses Pester's BDD syntax (`Describe`, `Context`, and `It`).
+Run the following commands from the repository root in PowerShell 7 or later.
+
+Check whether Pester is already installed:
+
+```powershell
+Get-Module Pester -ListAvailable | Select-Object Name, Version
+```
+
+When the command returns no module, install Pester for the current user:
+
+```powershell
+Install-Module Pester -Scope CurrentUser -Force
+```
+
+Run the complete suite:
+
+```powershell
+Invoke-Pester ./tests
+```
+
+To run only the browser-favorites specifications:
+
+```powershell
+Invoke-Pester ./tests/Get-BrowserFavorites.Tests.ps1
+```
