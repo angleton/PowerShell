@@ -1,6 +1,41 @@
 $scriptPath = Join-Path $PSScriptRoot '..\scripts\Get-BrowserFavorites.ps1'
 . $scriptPath
 
+Describe 'Find-InstalledBrowser' {
+  $detectedBrowsers = @(Find-InstalledBrowser)
+  $favorites = @(
+    foreach ($browser in $detectedBrowsers) {
+      foreach ($profile in $browser.Profiles) {
+        if ($browser.Type -eq 'Chromium') {
+          Get-ChromiumBookmarkBarEntry -BookmarksFile $profile.BookmarksFile -BrowserName $browser.Name -ProfileName $profile.ProfileName
+        }
+        else {
+          Get-FirefoxBookmarkBarEntry -PlacesDb $profile.PlacesDb -ProfileName $profile.ProfileName
+        }
+      }
+    }
+  )
+
+  $skipReason = $null
+  if ($detectedBrowsers.Count -eq 0) {
+    $skipReason = 'No supported browser profiles were detected on this computer.'
+  }
+  elseif ($favorites.Count -eq 0) {
+    $skipReason = 'No favorites detected; there is nothing to test.'
+  }
+
+  if ($skipReason) {
+    Write-Warning $skipReason
+  }
+
+  Context 'when browser profiles with favorites are available' {
+    It 'detects installed browsers and finds favorites the script can pull' -Skip:($null -ne $skipReason) {
+      $detectedBrowsers.Count | Should BeGreaterThan 0
+      $favorites.Count | Should BeGreaterThan 0
+    }
+  }
+}
+
 Describe 'Get-ChromiumBookmarkBarEntry' {
     Context 'when a bookmark bar contains bookmarks and folders' {
         It 'returns each bookmark with its browser, profile, and folder path' {

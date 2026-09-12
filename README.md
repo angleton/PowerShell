@@ -50,8 +50,12 @@ Install-Module Pester -Scope CurrentUser -Force
 Run the complete suite:
 
 ```powershell
-Invoke-Pester ./tests
+./scripts/Invoke-Tests.ps1
 ```
+
+The wrapper runs Pester and prints each result count on a separate line. Pester
+3.x displays test details by default, so do not add `-Output Detailed` when
+using that version because the parameter is ambiguous.
 
 To run only the browser-favorites specifications:
 

@@ -130,10 +130,10 @@ function Find-InstalledBrowser {
 function Expand-BookmarkNode {
     param(
         [Parameter(Mandatory)] $Node,
-        [Parameter(Mandatory)] [string]$FolderPath,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$FolderPath,
         [Parameter(Mandatory)] [string]$BrowserName,
         [Parameter(Mandatory)] [string]$ProfileName,
-        [Parameter(Mandatory)] [System.Collections.Generic.List[object]]$Results
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$Results
     )
 
     if ($Node.type -eq 'url') {
@@ -163,8 +163,9 @@ function Get-ChromiumBookmarkBarEntry {
     $results = [System.Collections.Generic.List[object]]::new()
 
     $json = Get-Content -LiteralPath $BookmarksFile -Raw | ConvertFrom-Json
-    $bar = $json.roots.bookmark_bar
-    if (-not $bar) { return $results }
+    $barProperty = $json.roots.PSObject.Properties['bookmark_bar']
+    if (-not $barProperty) { return $results }
+    $bar = $barProperty.Value
 
     foreach ($child in $bar.children) {
         Expand-BookmarkNode -Node $child -FolderPath '' -BrowserName $BrowserName -ProfileName $ProfileName -Results $results
@@ -217,74 +218,86 @@ function Get-FirefoxBookmarkBarEntry {
 
 #region Main
 
-$detected = Find-InstalledBrowser
+function Invoke-BrowserFavoritesExport {
+    [CmdletBinding()]
+    param(
+        [string]$OutputPath,
+        [switch]$All
+    )
 
-if ($detected.Count -eq 0) {
-    Write-Warning 'No supported browsers were detected.'
-    return
-}
+    $detected = Find-InstalledBrowser
 
-if ($All) {
-    $selected = $detected
-}
-else {
-    Write-Host 'Detected browsers:' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $detected.Count; $i++) {
-        Write-Host "  [$($i + 1)] $($detected[$i].Name)"
+    if ($detected.Count -eq 0) {
+        Write-Warning 'No supported browsers were detected.'
+        return
     }
-    Write-Host '  [A] All browsers'
 
-    $choice = Read-Host "Select browser number(s) (comma-separated) or 'A' for all"
-
-    if ($choice.Trim() -in @('A', 'a')) {
+    if ($All) {
         $selected = $detected
     }
     else {
-        $indices = $choice -split ',' |
-            ForEach-Object { $_.Trim() } |
-            Where-Object { $_ -match '^\d+$' } |
-            ForEach-Object { [int]$_ - 1 }
-        $selected = @($indices | Where-Object { $_ -ge 0 -and $_ -lt $detected.Count } | ForEach-Object { $detected[$_] })
-    }
-}
+        Write-Host 'Detected browsers:' -ForegroundColor Cyan
+        for ($i = 0; $i -lt $detected.Count; $i++) {
+            Write-Host "  [$($i + 1)] $($detected[$i].Name)"
+        }
+        Write-Host '  [A] All browsers'
 
-if (-not $selected -or $selected.Count -eq 0) {
-    Write-Warning 'No browsers selected. Exiting.'
-    return
-}
+        $choice = Read-Host "Select browser number(s) (comma-separated) or 'A' for all"
 
-# Resolve output path, falling back to a new Temp directory if unset or missing.
-if (-not $OutputPath -or -not (Test-Path -LiteralPath $OutputPath -PathType Container)) {
-    if ($OutputPath) {
-        Write-Warning "Specified OutputPath '$OutputPath' does not exist. Falling back to a new Temp directory."
-    }
-    $OutputPath = Join-Path ([System.IO.Path]::GetTempPath()) "BrowserFavorites_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-    New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
-}
-
-$allEntries = [System.Collections.Generic.List[object]]::new()
-
-foreach ($browser in $selected) {
-    foreach ($profile in $browser.Profiles) {
-        if ($browser.Type -eq 'Chromium') {
-            $entries = Get-ChromiumBookmarkBarEntry -BookmarksFile $profile.BookmarksFile -BrowserName $browser.Name -ProfileName $profile.ProfileName
+        if ($choice.Trim() -in @('A', 'a')) {
+            $selected = $detected
         }
         else {
-            $entries = Get-FirefoxBookmarkBarEntry -PlacesDb $profile.PlacesDb -ProfileName $profile.ProfileName
+            $indices = $choice -split ',' |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ -match '^\d+$' } |
+                ForEach-Object { [int]$_ - 1 }
+            $selected = @($indices | Where-Object { $_ -ge 0 -and $_ -lt $detected.Count } | ForEach-Object { $detected[$_] })
         }
-        foreach ($entry in $entries) { $allEntries.Add($entry) }
     }
+
+    if (-not $selected -or $selected.Count -eq 0) {
+        Write-Warning 'No browsers selected. Exiting.'
+        return
+    }
+
+    # Resolve output path, falling back to a new Temp directory if unset or missing.
+    if (-not $OutputPath -or -not (Test-Path -LiteralPath $OutputPath -PathType Container)) {
+        if ($OutputPath) {
+            Write-Warning "Specified OutputPath '$OutputPath' does not exist. Falling back to a new Temp directory."
+        }
+        $OutputPath = Join-Path ([System.IO.Path]::GetTempPath()) "BrowserFavorites_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        New-Item -Path $OutputPath -ItemType Directory -Force | Out-Null
+    }
+
+    $allEntries = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($browser in $selected) {
+        foreach ($profile in $browser.Profiles) {
+            if ($browser.Type -eq 'Chromium') {
+                $entries = Get-ChromiumBookmarkBarEntry -BookmarksFile $profile.BookmarksFile -BrowserName $browser.Name -ProfileName $profile.ProfileName
+            }
+            else {
+                $entries = Get-FirefoxBookmarkBarEntry -PlacesDb $profile.PlacesDb -ProfileName $profile.ProfileName
+            }
+            foreach ($entry in $entries) { $allEntries.Add($entry) }
+        }
+    }
+
+    $jsonPath = Join-Path $OutputPath 'BrowserFavorites.json'
+    $csvPath = Join-Path $OutputPath 'BrowserFavorites.csv'
+
+    $allEntries | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+    $allEntries | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+
+    Write-Host "Compiled $($allEntries.Count) favorite(s) from $($selected.Count) browser(s)." -ForegroundColor Green
+    Write-Host 'Saved to:' -ForegroundColor Green
+    Write-Host "  $jsonPath"
+    Write-Host "  $csvPath"
 }
 
-$jsonPath = Join-Path $OutputPath 'BrowserFavorites.json'
-$csvPath = Join-Path $OutputPath 'BrowserFavorites.csv'
-
-$allEntries | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
-$allEntries | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
-
-Write-Host "Compiled $($allEntries.Count) favorite(s) from $($selected.Count) browser(s)." -ForegroundColor Green
-Write-Host 'Saved to:' -ForegroundColor Green
-Write-Host "  $jsonPath"
-Write-Host "  $csvPath"
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-BrowserFavoritesExport -OutputPath $OutputPath -All:$All
+}
 
 #endregion
