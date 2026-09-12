@@ -2,6 +2,9 @@
 
 A collection of PowerShell utility scripts.
 
+> [!NOTE]
+> Browser favorites scripts in this repository are supported only on Windows.
+
 ## Scripts
 
 ### `scripts/Get-BrowserFavorites.ps1`

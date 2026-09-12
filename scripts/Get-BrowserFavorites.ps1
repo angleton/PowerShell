@@ -27,6 +27,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
+    Write-Error 'Get-BrowserFavorites.ps1 is supported only on Windows.'
+    exit 1
+}
+
 #region Browser detection
 
 function Find-InstalledBrowser {
