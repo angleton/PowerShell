@@ -36,6 +36,36 @@ Describe 'Find-InstalledBrowser' {
   }
 }
 
+Describe 'Save-BrowserOpenTabs' {
+    . (Join-Path $PSScriptRoot '..\scripts\Save-BrowserOpenTabs.ps1')
+
+    Context 'MozLz4Decoder' {
+        It 'decodes literals followed by an overlapping match' {
+            # 3 literals "abc", then a match of offset 3 and length 6.
+            $header = [byte[]](0x6D, 0x6F, 0x7A, 0x4C, 0x7A, 0x34, 0x30, 0x00, 9, 0, 0, 0)
+            $block = [byte[]](0x32, 0x61, 0x62, 0x63, 0x03, 0x00)
+            $decoded = [MozLz4Decoder]::Decode([byte[]]($header + $block))
+            [System.Text.Encoding]::ASCII.GetString($decoded) | Should Be 'abcabcabc'
+        }
+
+        It 'rejects data without the mozLz4 header' {
+            $message = try { [MozLz4Decoder]::Decode([byte[]](1..20)); '' } catch { $_.Exception.Message }
+            $message | Should Match 'Not a mozLz4 file'
+        }
+    }
+
+    Context 'New-UniqueFile' {
+        It 'appends an incrementing number when the name already exists' {
+            $first = New-UniqueFile -Directory $TestDrive -BaseName 'tabs'
+            $second = New-UniqueFile -Directory $TestDrive -BaseName 'tabs'
+            $third = New-UniqueFile -Directory $TestDrive -BaseName 'tabs'
+            (Split-Path $first -Leaf) | Should Be 'tabs.txt'
+            (Split-Path $second -Leaf) | Should Be 'tabs_1.txt'
+            (Split-Path $third -Leaf) | Should Be 'tabs_2.txt'
+        }
+    }
+}
+
 Describe 'Get-ChromiumBookmarkBarEntry' {
     Context 'when a bookmark bar contains bookmarks and folders' {
         It 'returns each bookmark with its browser, profile, and folder path' {

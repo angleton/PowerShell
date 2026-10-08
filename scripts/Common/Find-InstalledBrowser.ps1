@@ -96,9 +96,10 @@ function Find-InstalledBrowser {
 
         if ($ffProfiles.Count -gt 0) {
             $browsers += [pscustomobject]@{
-                Name     = 'Mozilla Firefox'
-                Type     = 'Firefox'
-                Profiles = $ffProfiles
+                Name        = 'Mozilla Firefox'
+                Type        = 'Firefox'
+                ProcessName = 'firefox'
+                Profiles    = $ffProfiles
             }
         }
     }

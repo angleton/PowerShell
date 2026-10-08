@@ -1,8 +1,12 @@
 <#
 .SYNOPSIS
-    Saves the URLs of all open tabs in running Chromium browsers to a text file.
+    Saves the URLs of all open tabs in running Chromium browsers and Firefox to a text file.
 .DESCRIPTION
-    Chromium browsers don't expose open tabs on disk while running, so this
+    Firefox: reads each in-use profile's live session file
+    (sessionstore-backups\recovery.jsonlz4, refreshed about every 15 seconds)
+    and records the current URL of every tab. No special launch flags needed.
+
+    Chromium: browsers don't expose open tabs on disk while running, so this
     queries each browser's DevTools endpoint (/json/list). A browser is only
     captured if it was started with --remote-debugging-port (or
     --remote-debugging-port=0, in which case the port is read from the
@@ -15,9 +19,9 @@
     100-nanosecond precision. If that name already exists, _1, _2, ... is
     appended before the extension.
 .PARAMETER Browser
-    Optional. Limits the capture to one browser by name, matching the Chromium
-    candidate names (e.g. 'Google Chrome', 'Microsoft Edge', 'Brave', 'Vivaldi',
-    'Opera'). Defaults to all running Chromium browsers.
+    Optional. Limits the capture to one browser by name ('Google Chrome',
+    'Microsoft Edge', 'Brave', 'Vivaldi', 'Opera', or 'Mozilla Firefox').
+    Defaults to all running supported browsers.
 .PARAMETER OutputPath
     Directory to save the file to. Defaults to the current directory; created if
     missing.
@@ -37,6 +41,89 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common\Find-InstalledBrowser.ps1')
+
+if (-not ('MozLz4Decoder' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+public static class MozLz4Decoder
+{
+    // Decodes Mozilla's mozLz4 container: "mozLz40\0", 4-byte LE size, raw LZ4 block.
+    public static byte[] Decode(byte[] input)
+    {
+        if (input == null || input.Length < 12 ||
+            input[0] != 'm' || input[1] != 'o' || input[2] != 'z' || input[3] != 'L' ||
+            input[4] != 'z' || input[5] != '4' || input[6] != '0' || input[7] != 0)
+            throw new InvalidOperationException("Not a mozLz4 file.");
+
+        int outSize = BitConverter.ToInt32(input, 8);
+        if (outSize < 0) throw new InvalidOperationException("Invalid mozLz4 size.");
+        byte[] output = new byte[outSize];
+        int ip = 12, op = 0;
+
+        while (ip < input.Length)
+        {
+            int token = input[ip++];
+            int litLen = token >> 4;
+            if (litLen == 15)
+            {
+                int b;
+                do { b = input[ip++]; litLen += b; } while (b == 255);
+            }
+            if (op + litLen > outSize || ip + litLen > input.Length) throw new InvalidOperationException("Corrupt LZ4 data.");
+            Buffer.BlockCopy(input, ip, output, op, litLen);
+            ip += litLen; op += litLen;
+            if (ip >= input.Length) break;
+
+            int offset = input[ip] | (input[ip + 1] << 8);
+            ip += 2;
+            if (offset == 0 || offset > op) throw new InvalidOperationException("Corrupt LZ4 data.");
+            int matchLen = token & 15;
+            if (matchLen == 15)
+            {
+                int b;
+                do { b = input[ip++]; matchLen += b; } while (b == 255);
+            }
+            matchLen += 4;
+            if (op + matchLen > outSize) throw new InvalidOperationException("Corrupt LZ4 data.");
+            // Byte-wise copy: matches may overlap their own output.
+            for (int i = 0; i < matchLen; i++, op++) output[op] = output[op - offset];
+        }
+        return output;
+    }
+}
+'@
+}
+
+function Get-FirefoxSessionTabUrl {
+    <# Returns the current URL of every open tab in a Firefox session file. #>
+    param([Parameter(Mandatory)][string]$SessionFile)
+
+    $bytes = [System.IO.File]::ReadAllBytes($SessionFile)
+    $json = [System.Text.Encoding]::UTF8.GetString([MozLz4Decoder]::Decode($bytes)) | ConvertFrom-Json
+
+    $urls = foreach ($window in @($json.windows)) {
+        foreach ($tab in @($window.tabs)) {
+            $entries = @($tab.entries)
+            if ($entries.Count -eq 0) { continue }
+            # 'index' is 1-based; fall back to the last entry if it is missing or out of range.
+            $position = if ($tab.PSObject.Properties['index'] -and $tab.index -ge 1 -and $tab.index -le $entries.Count) { $tab.index - 1 } else { $entries.Count - 1 }
+            $url = $entries[$position].url
+            if ($url) { $url }
+        }
+    }
+    return @($urls)
+}
+
+function Get-FirefoxSessionFile {
+    param([Parameter(Mandatory)][string]$ProfilePath)
+
+    # recovery.jsonlz4 is the live session, refreshed every ~15 seconds while Firefox runs.
+    foreach ($relative in 'sessionstore-backups\recovery.jsonlz4', 'sessionstore.jsonlz4') {
+        $path = Join-Path $ProfilePath $relative
+        if (Test-Path -LiteralPath $path) { return $path }
+    }
+    return $null
+}
 
 function Get-DebugPort {
     <# Returns the distinct DevTools ports of a running browser's main processes. #>
@@ -108,12 +195,12 @@ function Save-BrowserOpenTab {
     $runTime = Get-Date
 
     $candidates = @(Get-ChromiumBrowserCandidate)
-    $candidateNames = @($candidates | ForEach-Object { $_.Name })
+    $candidateNames = @($candidates | ForEach-Object { $_.Name }) + 'Mozilla Firefox'
     if ($Browser -and $candidateNames -notcontains $Browser) {
         throw "Unknown browser '$Browser'. Valid values: $($candidateNames -join ', ')."
     }
 
-    $installed = @(Find-InstalledBrowser | Where-Object { $_.Type -eq 'Chromium' })
+    $installed = @(Find-InstalledBrowser)
     if ($Browser) { $installed = @($installed | Where-Object { $_.Name -eq $Browser }) }
 
     $lines = [System.Collections.Generic.List[string]]::new()
@@ -124,20 +211,38 @@ function Save-BrowserOpenTab {
             continue
         }
 
-        $root = ($candidates | Where-Object { $_.Name -eq $b.Name }).Root
-        $ports = @(Get-DebugPort -ProcessName $b.ProcessName -DefaultUserDataDir $root)
-        if ($ports.Count -eq 0) {
-            Write-Warning "$($b.Name) is running without --remote-debugging-port; its tabs can't be read. Restart it with the flag to capture them."
-            continue
-        }
-
         $urls = [System.Collections.Generic.List[string]]::new()
-        foreach ($port in $ports) {
-            try {
-                foreach ($url in (Get-OpenTabUrl -Port $port)) { $urls.Add($url) }
+
+        if ($b.Type -eq 'Firefox') {
+            foreach ($browserProfile in $b.Profiles) {
+                $sessionFile = Get-FirefoxSessionFile -ProfilePath $browserProfile.ProfilePath
+                if (-not $sessionFile) { continue }
+                # Only profiles in use have a fresh session file; skip stale ones from idle profiles.
+                if (-not (Test-Path -LiteralPath (Join-Path $browserProfile.ProfilePath 'parent.lock')) -and
+                    -not (Test-Path -LiteralPath (Join-Path $browserProfile.ProfilePath 'lock'))) { continue }
+                try {
+                    foreach ($url in (Get-FirefoxSessionTabUrl -SessionFile $sessionFile)) { $urls.Add($url) }
+                }
+                catch {
+                    Write-Warning "Could not read $($b.Name) profile '$($browserProfile.ProfileName)': $($_.Exception.Message)"
+                }
             }
-            catch {
-                Write-Warning "Could not query $($b.Name) on port ${port}: $($_.Exception.Message)"
+        }
+        else {
+            $root = ($candidates | Where-Object { $_.Name -eq $b.Name }).Root
+            $ports = @(Get-DebugPort -ProcessName $b.ProcessName -DefaultUserDataDir $root)
+            if ($ports.Count -eq 0) {
+                Write-Warning "$($b.Name) is running without --remote-debugging-port; its tabs can't be read. Restart it with the flag to capture them."
+                continue
+            }
+
+            foreach ($port in $ports) {
+                try {
+                    foreach ($url in (Get-OpenTabUrl -Port $port)) { $urls.Add($url) }
+                }
+                catch {
+                    Write-Warning "Could not query $($b.Name) on port ${port}: $($_.Exception.Message)"
+                }
             }
         }
 
