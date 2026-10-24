@@ -188,12 +188,12 @@ function Invoke-BrowserFavoritesExport {
     foreach ($browser in $selected) {
         $browserEntries = [System.Collections.Generic.List[object]]::new()
 
-        foreach ($profile in $browser.Profiles) {
+        foreach ($p in $browser.Profiles) {
             if ($browser.Type -eq 'Chromium') {
-                $entries = Get-ChromiumBookmarkBarEntry -BookmarksFile $profile.BookmarksFile -BrowserName $browser.Name -ProfileName $profile.ProfileName
+                $entries = Get-ChromiumBookmarkBarEntry -BookmarksFile $p.BookmarksFile -BrowserName $browser.Name -ProfileName $p.ProfileName
             }
             else {
-                $entries = Get-FirefoxBookmarkBarEntry -PlacesDb $profile.PlacesDb -ProfileName $profile.ProfileName
+                $entries = Get-FirefoxBookmarkBarEntry -PlacesDb $p.PlacesDb -ProfileName $p.ProfileName
             }
             foreach ($entry in $entries) { $browserEntries.Add($entry) }
         }
