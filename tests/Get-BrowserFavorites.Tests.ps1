@@ -5,12 +5,12 @@ Describe 'Find-InstalledBrowser' {
   $detectedBrowsers = @(Find-InstalledBrowser)
   $favorites = @(
     foreach ($browser in $detectedBrowsers) {
-      foreach ($profile in $browser.Profiles) {
+      foreach ($browserProfile in $browser.Profiles) {
         if ($browser.Type -eq 'Chromium') {
-          Get-ChromiumBookmarkBarEntry -BookmarksFile $profile.BookmarksFile -BrowserName $browser.Name -ProfileName $profile.ProfileName
+          Get-ChromiumBookmarkBarEntry -BookmarksFile $browserProfile.BookmarksFile -BrowserName $browser.Name -ProfileName $browserProfile.ProfileName
         }
         else {
-          Get-FirefoxBookmarkBarEntry -PlacesDb $profile.PlacesDb -ProfileName $profile.ProfileName
+          Get-FirefoxBookmarkBarEntry -PlacesDb $browserProfile.PlacesDb -ProfileName $browserProfile.ProfileName
         }
       }
     }
